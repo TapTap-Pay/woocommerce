@@ -1,0 +1,11 @@
+/vendor/
+# composer.lock IS committed — it pins the SDK version that ships in
+# release zips, and CI reads it for reproducible builds.
+/build/
+/dist/
+/.phpunit.result.cache
+/.phpunit.cache/
+/.phpcs.xml.cache
+.idea/
+.vscode/
+.DS_Store

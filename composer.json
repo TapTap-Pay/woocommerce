@@ -1,0 +1,41 @@
+{
+    "name": "taptap-pay/woocommerce",
+    "description": "Official TapTap-Pay payment gateway for WooCommerce",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://taptap.rs",
+    "keywords": ["wordpress", "woocommerce", "payment-gateway", "taptap", "taptap-pay"],
+    "require": {
+        "php": ">=8.1",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "taptap-pay/sdk": "dev-main",
+        "yahnis-elsts/plugin-update-checker": "^5.6"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.10"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/TapTap-Pay/sdk-php"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "autoload": {
+        "psr-4": {
+            "TapTap\\Pay\\WooCommerce\\": "includes/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.1"
+        },
+        "allow-plugins": {
+            "composer/installers": false
+        }
+    }
+}
