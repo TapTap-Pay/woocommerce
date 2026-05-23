@@ -12,6 +12,11 @@
         "taptap-pay/sdk": "dev-main",
         "yahnis-elsts/plugin-update-checker": "^5.6"
     },
+    "extra": {
+        "release-bump": {
+            "_comment": "On every API release, .github/workflows/release-sdks.yml :: push_woocommerce regex-rewrites the `taptap-pay/sdk` constraint above to the new tag and bumps plugin-header version strings. Keep that line on its own without reformatting so the sed pattern keeps matching."
+        }
+    },
     "require-dev": {
         "squizlabs/php_codesniffer": "^3.10"
     },
