@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "557274917d33ae03324f102c7a09975a",
+    "content-hash": "31bd1b7d213eed16e34b44b17ab8d616",
     "packages": [
         {
             "name": "brick/math",
@@ -266,7 +266,7 @@
         },
         {
             "name": "taptap-pay/sdk",
-            "version": "dev-main",
+            "version": "0.0.47",
             "source": {
                 "type": "git",
                 "url": "https://github.com/TapTap-Pay/sdk-php.git",
@@ -288,7 +288,6 @@
             "require-dev": {
                 "phpunit/phpunit": "^10.5"
             },
-            "default-branch": true,
             "type": "library",
             "autoload": {
                 "psr-4": {
@@ -463,9 +462,7 @@
     ],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": {
-        "taptap-pay/sdk": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
@@ -477,5 +474,5 @@
     "platform-overrides": {
         "php": "8.1"
     },
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.9.0"
 }
