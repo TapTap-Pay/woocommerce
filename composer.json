@@ -15,7 +15,7 @@
         "php": ">=8.1",
         "ext-curl": "*",
         "ext-json": "*",
-        "taptap-pay/sdk": "0.0.47",
+        "taptap-pay/sdk": "0.0.48",
         "yahnis-elsts/plugin-update-checker": "^5.6"
     },
     "extra": {

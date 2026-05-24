@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "31bd1b7d213eed16e34b44b17ab8d616",
+    "content-hash": "d41ed5f1598cb9e694d94565871a2aba",
     "packages": [
         {
             "name": "brick/math",
@@ -266,16 +266,16 @@
         },
         {
             "name": "taptap-pay/sdk",
-            "version": "0.0.47",
+            "version": "0.0.48",
             "source": {
                 "type": "git",
                 "url": "https://github.com/TapTap-Pay/sdk-php.git",
-                "reference": "d8e4656d2061b99196abee57bb7ba9dda6a5d8db"
+                "reference": "706a17075c449651dc75e1bcf47f8c058e84c0e7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/TapTap-Pay/sdk-php/zipball/d8e4656d2061b99196abee57bb7ba9dda6a5d8db",
-                "reference": "d8e4656d2061b99196abee57bb7ba9dda6a5d8db",
+                "url": "https://api.github.com/repos/TapTap-Pay/sdk-php/zipball/706a17075c449651dc75e1bcf47f8c058e84c0e7",
+                "reference": "706a17075c449651dc75e1bcf47f8c058e84c0e7",
                 "shasum": ""
             },
             "require": {
@@ -323,10 +323,10 @@
                 "taptap-pay"
             ],
             "support": {
-                "source": "https://github.com/TapTap-Pay/sdk-php/tree/0.0.47",
+                "source": "https://github.com/TapTap-Pay/sdk-php/tree/0.0.48",
                 "issues": "https://github.com/TapTap-Pay/sdk-php/issues"
             },
-            "time": "2026-05-24T02:16:47+00:00"
+            "time": "2026-05-24T21:19:31+00:00"
         },
         {
             "name": "yahnis-elsts/plugin-update-checker",
