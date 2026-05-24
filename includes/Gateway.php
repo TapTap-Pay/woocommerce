@@ -81,6 +81,17 @@ final class Gateway extends WC_Payment_Gateway
         add_action('woocommerce_api_taptap_callback', [$this, 'handle_authorize_callback']);
     }
 
+    // -- Environment URLs ---------------------------------------------------
+    // CI rewrites these from PROD_URL / PROD_UI_URL / SANDBOX_URL /
+    // SANDBOX_UI_URL secrets at release time so the shipped plugin always
+    // carries the correct hosts. The merchant picks "production" or
+    // "sandbox" via the Mode dropdown; everything else is automatic.
+
+    public const PROD_API_URL = 'https://api.taptap.rs';
+    public const PROD_UI_URL = 'https://app.taptap.rs';
+    public const SANDBOX_API_URL = 'https://api.usetaptap.dev';
+    public const SANDBOX_UI_URL = 'https://admin.usetaptap.dev';
+
     public function init_form_fields(): void
     {
         $this->form_fields = [
@@ -105,16 +116,11 @@ final class Gateway extends WC_Payment_Gateway
             'credentials_section' => [
                 'title' => __('TapTap credentials', 'taptap-pay'),
                 'type' => 'title',
-                'description' => sprintf(
-                    /* translators: %s: dashboard URL */
-                    __('Mint an API key in the <a href="%s" target="_blank">TapTap dashboard</a> and paste it below along with the wallet that should receive payouts.', 'taptap-pay'),
-                    esc_url('https://app.taptap.rs/settings/api-keys')
-                ),
+                'description' => __('Paste your API key and wallet ID, or use the Authorize button above to connect automatically.', 'taptap-pay'),
             ],
             'api_key' => [
                 'title' => __('API key', 'taptap-pay'),
                 'type' => 'password',
-                'description' => __('Starts with sk_live_ (live) or sk_test_ (sandbox).', 'taptap-pay'),
                 'desc_tip' => true,
             ],
             'wallet_id' => [
@@ -123,25 +129,15 @@ final class Gateway extends WC_Payment_Gateway
                 'description' => __('UUID of the wallet that should receive payouts from this store.', 'taptap-pay'),
                 'desc_tip' => true,
             ],
-            'advanced_section' => [
-                'title' => __('Advanced', 'taptap-pay'),
-                'type' => 'title',
-                'description' => __('Defaults are fine for most stores. Override only if pointed at a non-production TapTap deployment.', 'taptap-pay'),
-            ],
-            'base_url' => [
-                'title' => __('API base URL', 'taptap-pay'),
-                'type' => 'text',
-                'default' => '',
-                'placeholder' => \TapTap\Pay\Options::DEFAULT_BASE_URL,
-                'description' => __('Leave blank for production. Override for staging / on-prem deployments.', 'taptap-pay'),
-                'desc_tip' => true,
-            ],
-            'checkout_base_url' => [
-                'title' => __('Hosted checkout base URL', 'taptap-pay'),
-                'type' => 'text',
-                'default' => 'https://pay.taptap.rs',
-                'description' => __('Customers are redirected to this host + /pay/{payment_id}.', 'taptap-pay'),
-                'desc_tip' => true,
+            'mode' => [
+                'title' => __('Mode', 'taptap-pay'),
+                'type' => 'select',
+                'default' => 'production',
+                'options' => [
+                    'production' => __('Production', 'taptap-pay'),
+                    'sandbox' => __('Sandbox', 'taptap-pay'),
+                ],
+                'description' => __('Sandbox uses the test environment. Switch to Production for live payments.', 'taptap-pay'),
             ],
             'webhook_section' => [
                 'title' => __('Webhook (auto-managed)', 'taptap-pay'),
@@ -300,10 +296,14 @@ final class Gateway extends WC_Payment_Gateway
         $order->update_status('pending', __('Waiting for TapTap Pay confirmation.', 'taptap-pay'));
         $order->save();
 
-        // Use the checkout_url the API returns (built from SANDBOX_URL /
-        // PROD_URL based on the server's MODE). Fall back to local config
-        // only if the field is empty (older API version).
-        $checkoutUrl = trim((string) $payment->getCheckoutUrl());
+        // Use checkout_url from the API response when the SDK exposes it
+        // (built from SANDBOX_UI_URL / PROD_UI_URL on the server). Fall
+        // back to the local config for older SDK versions that don't have
+        // the field yet.
+        $checkoutUrl = '';
+        if (method_exists($payment, 'getCheckoutUrl')) {
+            $checkoutUrl = trim((string) $payment->getCheckoutUrl());
+        }
         if ($checkoutUrl === '') {
             $checkoutUrl = $this->hosted_checkout_url($payment_id);
         }
@@ -455,13 +455,23 @@ final class Gateway extends WC_Payment_Gateway
 
     private function hosted_checkout_url(string $payment_id): string
     {
-        $base = (string) $this->get_option('checkout_base_url', 'https://pay.taptap.rs');
-        $base = rtrim($base, '/');
-        // Matches the hosted-checkout SPA route in the UI app:
-        // <Route path="/pay" element={<Pay />} /> reads `payment_id`
-        // from the query string. This fallback is only used when the
-        // API didn't populate Payment.payment_process_url itself.
-        return $base . '/pay?payment_id=' . rawurlencode($payment_id);
+        return rtrim($this->ui_url(), '/') . '/pay?payment_id=' . rawurlencode($payment_id);
+    }
+
+    /** API base URL for the current mode. */
+    private function api_url(): string
+    {
+        return $this->get_option('mode', 'production') === 'sandbox'
+            ? self::SANDBOX_API_URL
+            : self::PROD_API_URL;
+    }
+
+    /** UI / checkout base URL for the current mode. */
+    private function ui_url(): string
+    {
+        return $this->get_option('mode', 'production') === 'sandbox'
+            ? self::SANDBOX_UI_URL
+            : self::PROD_UI_URL;
     }
 
     /**
