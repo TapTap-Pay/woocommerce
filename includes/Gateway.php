@@ -71,6 +71,14 @@ final class Gateway extends WC_Payment_Gateway
         // (/?wc-api=taptap_return) we can hand to the API as
         // success_url/cancel_url.
         add_action('woocommerce_api_taptap_return', [$this, 'handle_return']);
+
+        // "Connect with TapTap" OAuth code-exchange flow. The merchant
+        // clicks "Authorize" on the settings page, the browser bounces
+        // through TapTap's consent screen, and returns with a one-shot
+        // code that the callback handler exchanges for api_key +
+        // wallet_id + webhook_secret.
+        add_action('woocommerce_api_taptap_authorize', [$this, 'handle_authorize_redirect']);
+        add_action('woocommerce_api_taptap_callback', [$this, 'handle_authorize_callback']);
     }
 
     public function init_form_fields(): void
@@ -157,6 +165,64 @@ final class Gateway extends WC_Payment_Gateway
     }
 
     /**
+     * Refuse to save with Enabled=yes when credentials are missing.
+     *
+     * WC's stock {@see WC_Settings_API::process_admin_options()} happily
+     * persists whatever the form submitted, so the operator could tick
+     * "Enable TapTap Pay at checkout" without filling in API key or
+     * wallet id. Admin would then show the gateway as Active in the
+     * Payments list while the customer-facing Checkout silently rendered
+     * "There are no payment methods available" — a confusing footgun.
+     *
+     * We let the parent persist first (so all other field edits stick),
+     * then re-read the merged option, and if Enabled is on while either
+     * credential is empty we flip Enabled back to "no" and surface a
+     * WC admin notice explaining why. The WebhookProvisioner hook on
+     * the same action runs at priority 100, so it sees the corrected
+     * value and skips provisioning.
+     *
+     * @return bool true when settings were persisted as submitted; false
+     *              when we forced Enabled off.
+     */
+    public function process_admin_options()
+    {
+        $saved = parent::process_admin_options();
+        if (!$saved) {
+            return false;
+        }
+
+        // Reload from disk; parent::process_admin_options() updates the
+        // option but the in-memory $this->settings copy lags one read.
+        $this->init_settings();
+        $enabled = $this->get_option('enabled') === 'yes';
+        if (!$enabled) {
+            return $saved;
+        }
+
+        $missing = [];
+        if (trim((string) $this->get_option('api_key')) === '') {
+            $missing[] = __('API key', 'taptap-pay');
+        }
+        if (trim((string) $this->get_option('wallet_id')) === '') {
+            $missing[] = __('Target wallet ID', 'taptap-pay');
+        }
+        if ($missing === []) {
+            return $saved;
+        }
+
+        $this->update_option('enabled', 'no');
+        \WC_Admin_Settings::add_error(sprintf(
+            /* translators: %s: comma-separated list of missing field names */
+            __(
+                'TapTap Pay was not enabled at checkout because the following required setting(s) are empty: %s. Fill them in and save again.',
+                'taptap-pay'
+            ),
+            implode(', ', $missing)
+        ));
+        return false;
+    }
+
+    /**
      * Build a fresh TapTap Payment for this WC order and hand the
      * customer the hosted-checkout URL.
      *
@@ -234,9 +300,17 @@ final class Gateway extends WC_Payment_Gateway
         $order->update_status('pending', __('Waiting for TapTap Pay confirmation.', 'taptap-pay'));
         $order->save();
 
+        // Use the checkout_url the API returns (built from SANDBOX_URL /
+        // PROD_URL based on the server's MODE). Fall back to local config
+        // only if the field is empty (older API version).
+        $checkoutUrl = trim((string) $payment->getCheckoutUrl());
+        if ($checkoutUrl === '') {
+            $checkoutUrl = $this->hosted_checkout_url($payment_id);
+        }
+
         return [
             'result' => 'success',
-            'redirect' => $this->hosted_checkout_url($payment_id),
+            'redirect' => $checkoutUrl,
         ];
     }
 
@@ -383,7 +457,11 @@ final class Gateway extends WC_Payment_Gateway
     {
         $base = (string) $this->get_option('checkout_base_url', 'https://pay.taptap.rs');
         $base = rtrim($base, '/');
-        return $base . '/pay/' . rawurlencode($payment_id);
+        // Matches the hosted-checkout SPA route in the UI app:
+        // <Route path="/pay" element={<Pay />} /> reads `payment_id`
+        // from the query string. This fallback is only used when the
+        // API didn't populate Payment.payment_process_url itself.
+        return $base . '/pay?payment_id=' . rawurlencode($payment_id);
     }
 
     /**
@@ -423,5 +501,141 @@ final class Gateway extends WC_Payment_Gateway
             }
         }
         return $best;
+    }
+
+    // ---- Connect-with-TapTap OAuth flow ----------------------------------
+
+    /**
+     * Step 1: redirect the merchant's browser to TapTap's consent page.
+     * Reached via /?wc-api=taptap_authorize.
+     */
+    public function handle_authorize_redirect(): void
+    {
+        $state = wp_generate_password(32, false);
+        set_transient('taptap_oauth_state', $state, 600);
+
+        $settings = Plugin::settings();
+        $base = $settings->effective_base_url();
+        $callback = \WC()->api_request_url('taptap_callback');
+
+        $url = $base . '/oauth/woocommerce/authorize?' . http_build_query([
+            'redirect_uri' => $callback,
+            'state' => $state,
+        ]);
+
+        wp_redirect($url);
+        exit;
+    }
+
+    /**
+     * Step 3: receive the one-shot code from the consent redirect,
+     * exchange it for credentials, save everything.
+     * Reached via /?wc-api=taptap_callback&code=…&state=….
+     */
+    public function handle_authorize_callback(): void
+    {
+        $code = sanitize_text_field((string) ($_GET['code'] ?? ''));
+        $state = sanitize_text_field((string) ($_GET['state'] ?? ''));
+        $error = sanitize_text_field((string) ($_GET['error'] ?? ''));
+        $stored_state = (string) get_transient('taptap_oauth_state');
+        delete_transient('taptap_oauth_state');
+
+        $settings_url = admin_url(
+            'admin.php?page=wc-settings&tab=checkout&section=' . Plugin::GATEWAY_ID
+        );
+
+        if ($error !== '') {
+            \WC_Admin_Settings::add_error(sprintf(
+                /* translators: %s: error key */
+                __('TapTap authorization was denied: %s.', 'taptap-pay'),
+                $error
+            ));
+            wp_safe_redirect($settings_url);
+            exit;
+        }
+
+        if ($code === '' || $state === '' || $stored_state === '' || !hash_equals($stored_state, $state)) {
+            \WC_Admin_Settings::add_error(
+                __('TapTap authorization failed: invalid or expired state. Please try again.', 'taptap-pay')
+            );
+            wp_safe_redirect($settings_url);
+            exit;
+        }
+
+        $settings = Plugin::settings();
+        $exchange_url = $settings->effective_base_url() . '/oauth/woocommerce/exchange';
+        $resp = wp_remote_post($exchange_url, [
+            'body' => ['code' => $code],
+            'timeout' => 15,
+        ]);
+
+        if (is_wp_error($resp)) {
+            \WC_Admin_Settings::add_error(sprintf(
+                /* translators: %s: error message */
+                __('TapTap credential exchange failed: %s', 'taptap-pay'),
+                $resp->get_error_message()
+            ));
+            wp_safe_redirect($settings_url);
+            exit;
+        }
+
+        $status_code = wp_remote_retrieve_response_code($resp);
+        $body = json_decode(wp_remote_retrieve_body($resp), true);
+
+        if ($status_code !== 200 || !is_array($body) || empty($body['api_key'])) {
+            $err = $body['error_description'] ?? $body['error'] ?? 'unexpected response';
+            \WC_Admin_Settings::add_error(sprintf(
+                /* translators: %s: error description */
+                __('TapTap credential exchange failed: %s', 'taptap-pay'),
+                esc_html((string) $err)
+            ));
+            wp_safe_redirect($settings_url);
+            exit;
+        }
+
+        Settings::persist_patch([
+            'enabled' => 'yes',
+            'api_key' => $body['api_key'],
+            'wallet_id' => $body['wallet_id'] ?? '',
+            'webhook_secret' => $body['webhook_secret'] ?? '',
+            'webhook_id' => $body['webhook_subscription_id'] ?? '',
+        ]);
+
+        \WC_Admin_Settings::add_message(
+            __('TapTap Pay is now connected and enabled at checkout.', 'taptap-pay')
+        );
+        wp_safe_redirect($settings_url);
+        exit;
+    }
+
+    /**
+     * Override admin_options to prepend the "Connect with TapTap" button
+     * above the standard form when credentials haven't been set yet.
+     */
+    public function admin_options(): void
+    {
+        $settings = Plugin::settings();
+        if (!$settings->is_configured()) {
+            $authorize_url = \WC()->api_request_url('taptap_authorize');
+            echo '<div style="margin-bottom:24px;padding:20px;border:1px solid #2271b1;border-radius:8px;background:#f0f6fc;">';
+            echo '<h3 style="margin:0 0 8px">' . esc_html__('Connect your TapTap account', 'taptap-pay') . '</h3>';
+            echo '<p style="margin:0 0 12px;color:#555;">';
+            echo esc_html__('Click the button below to securely connect this store to your TapTap vendor account. You\'ll choose which wallet should receive payouts.', 'taptap-pay');
+            echo '</p>';
+            echo '<a href="' . esc_url($authorize_url) . '" class="button button-primary button-hero">';
+            echo '🔗 ' . esc_html__('Authorize in TapTap', 'taptap-pay');
+            echo '</a>';
+            echo '</div>';
+        } else {
+            echo '<div style="margin-bottom:16px;padding:12px 16px;border:1px solid #00a32a;border-radius:6px;background:#edfaef;">';
+            echo '<strong>✓ ' . esc_html__('Connected to TapTap', 'taptap-pay') . '</strong>';
+            echo ' — ' . esc_html(sprintf(
+                /* translators: %s: api key prefix */
+                __('API key %s…', 'taptap-pay'),
+                substr($settings->apiKey, 0, 24)
+            ));
+            echo '</div>';
+        }
+        parent::admin_options();
     }
 }

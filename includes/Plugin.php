@@ -53,6 +53,20 @@ final class Plugin
             [WebhookProvisioner::class, 'sync_after_save'],
             100
         );
+
+        // WC Blocks ships its own payment-method registry that's
+        // separate from the legacy `woocommerce_payment_gateways`
+        // filter. Without this hook the gateway is invisible at the
+        // block-based Checkout (default since WC 8.3 and the new
+        // template since 9.0), even when marked Active in admin.
+        add_action(
+            'woocommerce_blocks_payment_method_type_registration',
+            static function ($registry): void {
+                if (class_exists(\Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType::class)) {
+                    $registry->register(new BlocksGateway());
+                }
+            }
+        );
     }
 
     /**

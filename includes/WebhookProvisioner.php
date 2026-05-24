@@ -53,6 +53,12 @@ final class WebhookProvisioner
         if (!$settings->is_configured()) {
             return;
         }
+        // When the authorize flow already provisioned the webhook (the
+        // exchange response populated webhook_id), skip re-provisioning.
+        // Re-saving settings shouldn't mint a second subscription.
+        if ($settings->webhookId !== '') {
+            return;
+        }
 
         try {
             self::ensure_subscription($settings);
