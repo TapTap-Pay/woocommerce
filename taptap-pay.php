@@ -3,7 +3,7 @@
  * Plugin Name:       TapTap Pay for WooCommerce
  * Plugin URI:        https://github.com/TapTap-Pay/woocommerce
  * Description:       Accept card and bank-transfer payments via TapTap-Pay. Self-updating from GitHub releases.
- * Version:           0.0.48
+ * Version:           0.0.1
  * Requires at least: 6.2
  * Requires PHP:      8.1
  * Author:            TapTap-Pay
@@ -25,7 +25,7 @@ if (defined('TAPTAP_PAY_PLUGIN_FILE')) {
 }
 
 define('TAPTAP_PAY_PLUGIN_FILE', __FILE__);
-define('TAPTAP_PAY_VERSION', '0.0.48');
+define('TAPTAP_PAY_VERSION', '0.0.1');
 define('TAPTAP_PAY_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('TAPTAP_PAY_PLUGIN_URL', plugin_dir_url(__FILE__));
 

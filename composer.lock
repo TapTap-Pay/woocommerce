@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d41ed5f1598cb9e694d94565871a2aba",
+    "content-hash": "cfdd9a80e928c2e1de2a8e68afc9e853",
     "packages": [
         {
             "name": "brick/math",
@@ -266,16 +266,16 @@
         },
         {
             "name": "taptap-pay/sdk",
-            "version": "0.0.48",
+            "version": "0.0.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/TapTap-Pay/sdk-php.git",
-                "reference": "706a17075c449651dc75e1bcf47f8c058e84c0e7"
+                "reference": "be37e1b9ff8d46533d038b28cf6d70075474a971"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/TapTap-Pay/sdk-php/zipball/706a17075c449651dc75e1bcf47f8c058e84c0e7",
-                "reference": "706a17075c449651dc75e1bcf47f8c058e84c0e7",
+                "url": "https://api.github.com/repos/TapTap-Pay/sdk-php/zipball/be37e1b9ff8d46533d038b28cf6d70075474a971",
+                "reference": "be37e1b9ff8d46533d038b28cf6d70075474a971",
                 "shasum": ""
             },
             "require": {
@@ -314,7 +314,7 @@
                 "Apache-2.0"
             ],
             "description": "Official PHP SDK for the TapTap-Pay API",
-            "homepage": "https://taptap.rs",
+            "homepage": "https://usetaptap.com",
             "keywords": [
                 "connectrpc",
                 "payments",
@@ -323,10 +323,10 @@
                 "taptap-pay"
             ],
             "support": {
-                "source": "https://github.com/TapTap-Pay/sdk-php/tree/0.0.48",
+                "source": "https://github.com/TapTap-Pay/sdk-php/tree/0.0.2",
                 "issues": "https://github.com/TapTap-Pay/sdk-php/issues"
             },
-            "time": "2026-05-24T21:19:31+00:00"
+            "time": "2026-05-25T12:58:15+00:00"
         },
         {
             "name": "yahnis-elsts/plugin-update-checker",

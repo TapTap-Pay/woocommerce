@@ -56,10 +56,10 @@ final class Gateway extends WC_Payment_Gateway
 
     // -- Environment URLs ---------------------------------------------------
 
-    public const PROD_API_URL = 'https://api.usetaptap.com';
-    public const PROD_UI_URL = 'https://app.usetaptap.com';
-    public const SANDBOX_API_URL = 'https://api.usetaptap.dev';
-    public const SANDBOX_UI_URL = 'https://admin.usetaptap.dev';
+    public const PROD_API_URL = 'https://usetaptap.com/';
+    public const PROD_UI_URL = 'https://dash.usetaptap.com/';
+    public const SANDBOX_API_URL = 'https://api.usetaptap.dev/';
+    public const SANDBOX_UI_URL = 'https://admin.usetaptap.rs/';
 
     public function init_form_fields(): void
     {
