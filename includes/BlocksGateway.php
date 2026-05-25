@@ -94,6 +94,7 @@ final class BlocksGateway extends AbstractPaymentMethodType
             'description' => $settings->description,
             'icon' => TAPTAP_PAY_PLUGIN_URL . 'assets/icon.svg',
             'supports' => ['products', 'refunds'],
+            'is_sandbox' => $settings->mode === 'sandbox',
         ];
     }
 }

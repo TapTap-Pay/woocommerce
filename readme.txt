@@ -27,7 +27,7 @@ TapTap Pay for WooCommerce adds TapTap-Pay as a checkout option on your WooComme
 
 1. Download the latest `taptap-pay-*.zip` from [GitHub releases](https://github.com/TapTap-Pay/woocommerce/releases).
 2. WP Admin → Plugins → Add New → Upload Plugin → choose the zip → Install Now → Activate.
-3. You will be redirected to the gateway settings page. Paste your TapTap API key (from app.taptap.rs → Settings → API Keys) and the wallet UUID that should receive payouts.
+3. You will be redirected to the gateway settings page. Paste your TapTap API key (from app.usetaptap.com → Settings → API Keys) and the wallet UUID that should receive payouts.
 4. Click Save Changes. The plugin will auto-create a webhook subscription pointing at your store.
 5. Tick "Enable TapTap Pay at checkout" and save again.
 
@@ -37,7 +37,7 @@ That's it — place a test order to confirm.
 
 = Where do I get an API key? =
 
-Sign up at https://app.taptap.rs and mint a key under Settings → API Keys. Sandbox keys are prefixed `sk_test_`; live keys `sk_live_`.
+Sign up at https://app.usetaptap.com and mint a key under Settings → API Keys. Sandbox keys are prefixed `sk_test_`; live keys `sk_live_`.
 
 = Does the plugin auto-update? =
 

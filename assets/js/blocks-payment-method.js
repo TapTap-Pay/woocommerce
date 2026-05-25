@@ -39,10 +39,29 @@
 		);
 	};
 
-	const Content = () =>
-		descriptionText
-			? createElement( 'div', null, descriptionText )
-			: null;
+	const Content = () => {
+		const parts = [];
+		if ( settings.is_sandbox ) {
+			parts.push(
+				createElement( 'div', {
+					key: 'sandbox',
+					style: {
+						background: '#fff3cd',
+						borderLeft: '4px solid #ffc107',
+						color: '#856404',
+						padding: '8px 12px',
+						marginBottom: '8px',
+						borderRadius: '4px',
+						fontSize: '13px',
+					},
+				}, '⚠ Sandbox Mode — No real money will be charged.' )
+			);
+		}
+		if ( descriptionText ) {
+			parts.push( createElement( 'div', { key: 'desc' }, descriptionText ) );
+		}
+		return parts.length ? createElement( 'div', null, ...parts ) : null;
+	};
 
 	registerPaymentMethod( {
 		name: PAYMENT_METHOD_ID,

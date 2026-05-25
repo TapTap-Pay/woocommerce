@@ -29,7 +29,7 @@ final class SdkFactory
                 __('TapTap Pay is not configured: API key and wallet ID are required.', 'taptap-pay')
             );
         }
-        $base = $settings->effective_base_url();
+        $base = $settings->api_url();
         $key = $settings->apiKey;
 
         if (self::$cached !== null && self::$cachedFor !== null

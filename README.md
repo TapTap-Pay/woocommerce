@@ -3,7 +3,7 @@
 [![CI](https://github.com/TapTap-Pay/woocommerce/actions/workflows/ci.yml/badge.svg)](https://github.com/TapTap-Pay/woocommerce/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
 
-Official WooCommerce payment gateway for [TapTap-Pay](https://taptap.rs).
+Official WooCommerce payment gateway for [TapTap-Pay](https://usetaptap.com).
 
 ## What you get
 
@@ -20,7 +20,7 @@ Grab the latest `taptap-pay-<version>.zip` from the [releases page](https://gith
 
 After activation you'll be auto-redirected to the gateway settings. Paste:
 
-- **API key** — minted in the [TapTap dashboard](https://app.taptap.rs/settings/api-keys) (`sk_test_…` for sandbox, `sk_live_…` for live).
+- **API key** — minted in the [TapTap dashboard](https://app.usetaptap.com/settings/api-keys) (`sk_test_…` for sandbox, `sk_live_…` for live).
 - **Wallet ID** — the UUID of the wallet that should receive payouts.
 
 Hit **Save changes** — the plugin auto-creates the webhook subscription. Then tick **Enable TapTap Pay at checkout** and save again.

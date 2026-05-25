@@ -1,30 +1,103 @@
 name: Release
 
-# Tag-driven. Push a tag like `v0.1.0` (or `v0.1.0-beta1` for a
-# pre-release) and this workflow:
-#   1. Bumps the plugin header + Version constant + readme.txt stable
-#      tag to match the tag.
-#   2. composer install --no-dev so vendor/ contains only runtime deps.
-#   3. Packages everything into taptap-pay-<tag>.zip.
-#   4. Cuts a GitHub Release with the zip as a release asset.
+# Two triggers:
+# 1. Push to main with #patch/#minor/#major — for plugin-only changes.
+# 2. repository_dispatch from sdk-php's release workflow — auto-bumps
+#    the SDK dependency and releases a new plugin version.
 #
-# Plugin Update Checker on each installed store reads this release
-# feed, picks up the new tag, downloads the zip asset (matched by the
-# pattern in includes/UpdateChecker.php), and offers the update.
+# Both flows: compute the plugin's own next version, build the zip,
+# and cut a GitHub Release. Plugin Update Checker on each installed
+# store reads the release feed and offers the update.
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  repository_dispatch:
+    types: [sdk-php-released]
 
 jobs:
-  build:
-    name: Build + release ${{ github.ref_name }}
+  release:
+    name: Build and release
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'repository_dispatch' ||
+      contains(github.event.head_commit.message, '#patch') ||
+      contains(github.event.head_commit.message, '#minor') ||
+      contains(github.event.head_commit.message, '#major')
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Determine bump type
+        id: bump
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          else
+            MSG='${{ github.event.head_commit.message }}'
+            if [[ "$MSG" == *"#major"* ]]; then
+              echo "type=major" >> "$GITHUB_OUTPUT"
+            elif [[ "$MSG" == *"#minor"* ]]; then
+              echo "type=minor" >> "$GITHUB_OUTPUT"
+            else
+              echo "type=patch" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          LATEST=$(git tag --list --sort=-v:refname 'v[0-9]*.[0-9]*.[0-9]*' | head -1)
+          LATEST=${LATEST:-v0.0.0}
+          IFS='.' read -r major minor patch <<< "${LATEST#v}"
+          case "${{ steps.bump.outputs.type }}" in
+            patch) patch=$((patch + 1)) ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+          esac
+          echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+          echo "bare=${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${major}.${minor}.${patch}"
+
+      - name: Pin new sdk-php version (dispatch only)
+        if: github.event_name == 'repository_dispatch'
+        env:
+          SDK_VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          set -euo pipefail
+          php -r '
+            $f = "composer.json";
+            $j = json_decode(file_get_contents($f), true);
+            $j["require"]["taptap-pay/sdk"] = getenv("SDK_VERSION");
+            file_put_contents($f, json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+          '
+
+      - name: Bump version strings in source
+        env:
+          VERSION: ${{ steps.version.outputs.bare }}
+        run: |
+          set -euo pipefail
+          sed -i "s|^ \* Version:           [0-9].*| * Version:           ${VERSION}|" taptap-pay.php
+          sed -i "s|define('TAPTAP_PAY_VERSION', '[^']*');|define('TAPTAP_PAY_VERSION', '${VERSION}');|" taptap-pay.php
+          sed -i "s|^Stable tag: .*|Stable tag: ${VERSION}|" readme.txt
+
+      - name: Bake environment URLs
+        env:
+          PROD_URL: ${{ secrets.PROD_URL }}
+          PROD_UI_URL: ${{ secrets.PROD_UI_URL }}
+          SANDBOX_URL: ${{ secrets.SANDBOX_URL }}
+          SANDBOX_UI_URL: ${{ secrets.SANDBOX_UI_URL }}
+        run: |
+          sed -i "s|PROD_API_URL = '.*'|PROD_API_URL = '${PROD_URL}'|" includes/Gateway.php
+          sed -i "s|PROD_UI_URL = '.*'|PROD_UI_URL = '${PROD_UI_URL}'|" includes/Gateway.php
+          sed -i "s|SANDBOX_API_URL = '.*'|SANDBOX_API_URL = '${SANDBOX_URL}'|" includes/Gateway.php
+          sed -i "s|SANDBOX_UI_URL = '.*'|SANDBOX_UI_URL = '${SANDBOX_UI_URL}'|" includes/Gateway.php
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -34,41 +107,36 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Derive version (strip leading v)
-        id: version
-        run: |
-          tag='${{ github.ref_name }}'
-          echo "value=${tag#v}" >> "$GITHUB_OUTPUT"
-          if [[ "$tag" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Bump version strings in source
-        run: |
-          set -euo pipefail
-          v='${{ steps.version.outputs.value }}'
-          sed -i "s|^ \* Version:           [0-9].*|* Version:           ${v}|" taptap-pay.php
-          sed -i "s|define('TAPTAP_PAY_VERSION', '[^']*');|define('TAPTAP_PAY_VERSION', '${v}');|" taptap-pay.php
-          sed -i "s|^Stable tag: .*|Stable tag: ${v}|" readme.txt
-
       - name: Composer install (runtime only)
-        run: composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader
+        run: |
+          composer update --no-interaction --no-progress --no-scripts
+          composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader
 
       - name: Lint
         run: |
           find . -path ./vendor/composer -prune -o -path ./vendor/yahnis-elsts -prune -o -type f -name '*.php' -print \
             | xargs -n1 -P4 php -l > /dev/null
 
-      - name: Build zip
-        id: zip
+      - name: Commit, tag, push
         run: |
           set -euo pipefail
-          v='${{ steps.version.outputs.value }}'
-          asset="taptap-pay-${v}.zip"
-          # Stage into a directory named `taptap-pay` so the zip
-          # extracts into wp-content/plugins/taptap-pay/ on install.
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Only commit source files — vendor/ is a build artefact for the zip
+          git add composer.json composer.lock taptap-pay.php readme.txt includes/Gateway.php
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: release ${{ steps.version.outputs.tag }}"
+          fi
+          git tag -a "${{ steps.version.outputs.tag }}" -m "${{ steps.version.outputs.tag }}"
+          git push origin main --tags
+
+      - name: Build zip
+        id: zip
+        env:
+          VERSION: ${{ steps.version.outputs.bare }}
+        run: |
+          set -euo pipefail
+          asset="taptap-pay-${VERSION}.zip"
           rm -rf build && mkdir -p build/taptap-pay
           rsync -a --exclude='/.git*' \
                     --exclude='/build' \
@@ -86,13 +154,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          flags=()
-          if [[ '${{ steps.version.outputs.prerelease }}' == 'true' ]]; then
-            flags+=(--prerelease)
-          fi
-          gh release create '${{ github.ref_name }}' \
-            --title '${{ github.ref_name }}' \
+          gh release create '${{ steps.version.outputs.tag }}' \
+            --title '${{ steps.version.outputs.tag }}' \
             --generate-notes \
-            "${flags[@]}" \
             '${{ steps.zip.outputs.path }}'

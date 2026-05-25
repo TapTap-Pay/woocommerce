@@ -25,9 +25,14 @@ if (is_array($settings)
     && class_exists(\TapTap\Pay\Client::class)
 ) {
     try {
+        $mode = $settings['mode'] ?? 'production';
+        $baseUrl = $mode === 'sandbox'
+            ? 'https://api.usetaptap.dev'
+            : 'https://api.usetaptap.com';
+
         $client = new \TapTap\Pay\Client(new \TapTap\Pay\Options(
             apiKey: (string) $settings['api_key'],
-            baseUrl: $settings['base_url'] ?? null,
+            baseUrl: $baseUrl,
         ));
         $client->webhooks->deleteWebhook(
             (new \Programmatic\Webhooks\V1\DeleteWebhookRequest())

@@ -3,7 +3,7 @@
     "description": "Official TapTap-Pay payment gateway for WooCommerce",
     "type": "wordpress-plugin",
     "license": "GPL-2.0-or-later",
-    "homepage": "https://taptap.rs",
+    "homepage": "https://usetaptap.com",
     "keywords": [
         "wordpress",
         "woocommerce",

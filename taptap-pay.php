@@ -7,7 +7,7 @@
  * Requires at least: 6.2
  * Requires PHP:      8.1
  * Author:            TapTap-Pay
- * Author URI:        https://taptap.rs
+ * Author URI:        https://usetaptap.com
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       taptap-pay
