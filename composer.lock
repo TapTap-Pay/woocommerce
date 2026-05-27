@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "cfdd9a80e928c2e1de2a8e68afc9e853",
+    "content-hash": "00817b2671f0dc2c840c95d4cc13ca44",
     "packages": [
         {
             "name": "brick/math",
@@ -266,16 +266,16 @@
         },
         {
             "name": "taptap-pay/sdk",
-            "version": "0.0.2",
+            "version": "0.0.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/TapTap-Pay/sdk-php.git",
-                "reference": "be37e1b9ff8d46533d038b28cf6d70075474a971"
+                "reference": "6d97f84f20d8bf630221b839e6cedb05e1b1b031"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/TapTap-Pay/sdk-php/zipball/be37e1b9ff8d46533d038b28cf6d70075474a971",
-                "reference": "be37e1b9ff8d46533d038b28cf6d70075474a971",
+                "url": "https://api.github.com/repos/TapTap-Pay/sdk-php/zipball/6d97f84f20d8bf630221b839e6cedb05e1b1b031",
+                "reference": "6d97f84f20d8bf630221b839e6cedb05e1b1b031",
                 "shasum": ""
             },
             "require": {
@@ -323,23 +323,23 @@
                 "taptap-pay"
             ],
             "support": {
-                "source": "https://github.com/TapTap-Pay/sdk-php/tree/0.0.2",
+                "source": "https://github.com/TapTap-Pay/sdk-php/tree/0.0.3",
                 "issues": "https://github.com/TapTap-Pay/sdk-php/issues"
             },
-            "time": "2026-05-25T12:58:15+00:00"
+            "time": "2026-05-27T19:43:39+00:00"
         },
         {
             "name": "yahnis-elsts/plugin-update-checker",
-            "version": "v5.6",
+            "version": "v5.7",
             "source": {
                 "type": "git",
                 "url": "https://github.com/YahnisElsts/plugin-update-checker.git",
-                "reference": "a2db6871deec989a74e1f90fafc6d58ae526a879"
+                "reference": "275a96a2a18d03c34c87f35cb68673c8c49ac3b1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/YahnisElsts/plugin-update-checker/zipball/a2db6871deec989a74e1f90fafc6d58ae526a879",
-                "reference": "a2db6871deec989a74e1f90fafc6d58ae526a879",
+                "url": "https://api.github.com/repos/YahnisElsts/plugin-update-checker/zipball/275a96a2a18d03c34c87f35cb68673c8c49ac3b1",
+                "reference": "275a96a2a18d03c34c87f35cb68673c8c49ac3b1",
                 "shasum": ""
             },
             "require": {
@@ -349,7 +349,7 @@
             "type": "library",
             "autoload": {
                 "files": [
-                    "load-v5p6.php"
+                    "load-v5p7.php"
                 ]
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -374,9 +374,9 @@
             ],
             "support": {
                 "issues": "https://github.com/YahnisElsts/plugin-update-checker/issues",
-                "source": "https://github.com/YahnisElsts/plugin-update-checker/tree/v5.6"
+                "source": "https://github.com/YahnisElsts/plugin-update-checker/tree/v5.7"
             },
-            "time": "2025-05-20T12:29:01+00:00"
+            "time": "2026-05-26T12:48:45+00:00"
         }
     ],
     "packages-dev": [
