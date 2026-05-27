@@ -25,6 +25,8 @@ After activation you'll be auto-redirected to the gateway settings. Paste:
 
 Hit **Save changes** — the plugin auto-creates the webhook subscription. Then tick **Enable TapTap Pay at checkout** and save again.
 
+
+
 ## Versioning
 
 Plugin releases are independent of the [TapTap API](https://github.com/TapTap-Pay/api) cadence. The plugin pins a known-good `taptap-pay/sdk` version in its `composer.lock`, bumped explicitly by the maintainer when the SDK ships a feature the plugin needs.
