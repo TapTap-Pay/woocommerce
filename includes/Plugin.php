@@ -44,16 +44,6 @@ final class Plugin
             [$this, 'add_settings_link']
         );
 
-        // The webhook provisioner watches setting saves and reaches out
-        // to the TapTap API to ensure a subscription exists for this
-        // store. Hooked on the same action WC uses to persist gateway
-        // settings, so the new API key is already on disk when we read it.
-        add_action(
-            'woocommerce_update_options_payment_gateways_' . self::GATEWAY_ID,
-            [WebhookProvisioner::class, 'sync_after_save'],
-            100
-        );
-
         // WC Blocks ships its own payment-method registry that's
         // separate from the legacy `woocommerce_payment_gateways`
         // filter. Without this hook the gateway is invisible at the
@@ -117,10 +107,9 @@ final class Plugin
 
     public static function on_deactivation(): void
     {
-        // Intentionally no-op: leave settings + webhook subscription in
-        // place so a quick deactivate/reactivate doesn't wipe the
-        // store's API credentials. Uninstall is the cleanup path —
-        // see uninstall.php.
+        // Intentionally no-op: leave the settings in place so a quick
+        // deactivate/reactivate doesn't wipe the store's API
+        // credentials. Uninstall is the cleanup path — see uninstall.php.
     }
 
     public function maybe_activation_redirect(): void

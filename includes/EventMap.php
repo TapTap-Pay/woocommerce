@@ -12,8 +12,9 @@ defined('ABSPATH') || exit;
  *
  * The TapTap API emits two parallel naming schemes:
  *
- *   - X-Webhook-Event header: dotted lower_snake (e.g. payment.succeeded)
- *   - PaymentStatus enum:     PAYMENT_STATUS_* screaming snake
+ *   - event_type in the webhook envelope: dotted lower_snake
+ *     (e.g. payment.succeeded)
+ *   - PaymentState enum: PAYMENT_STATE_* screaming snake
  *
  * Webhook deliveries always carry the dotted form; the status-poll
  * fallback path (on customer return) reads the enum. Both feed this
@@ -28,12 +29,10 @@ final class EventMap
      */
     public const EVENTS_PAID = [
         'payment.succeeded',
-        'payin.succeeded',
     ];
 
     public const EVENTS_FAILED = [
         'payment.failed',
-        'payin.failed',
     ];
 
     public const EVENTS_CANCELLED = [
@@ -42,20 +41,25 @@ final class EventMap
 
     public const EVENTS_REFUNDED = [
         'payment.refunded',
-        'refund.succeeded',
     ];
 
     public const EVENTS_PARTIALLY_REFUNDED = [
         'payment.partially_refunded',
     ];
 
-    /** PaymentStatus enum strings, mirrored from programmatic.types.v1.PaymentStatus. */
-    public const STATUS_PENDING = 'PAYMENT_STATUS_PENDING';
-    public const STATUS_IN_PROGRESS = 'PAYMENT_STATUS_IN_PROGRESS';
-    public const STATUS_SUCCEEDED = 'PAYMENT_STATUS_SUCCEEDED';
-    public const STATUS_FAILED = 'PAYMENT_STATUS_FAILED';
-    public const STATUS_CANCELLED = 'PAYMENT_STATUS_CANCELLED';
-    public const STATUS_REFUNDED = 'PAYMENT_STATUS_REFUNDED';
+    /**
+     * Sent once when a subscription is created or its challenge is
+     * re-issued: the endpoint proves it owns the URL by echoing the
+     * nonce in the envelope's data.
+     */
+    public const EVENT_CHALLENGE = 'webhook.endpoint_challenge';
+
+    /** PaymentState enum strings, mirrored from taptap.payment.programmatic.v1.PaymentState. */
+    public const STATUS_SUCCEEDED = 'PAYMENT_STATE_SUCCEEDED';
+    public const STATUS_FAILED = 'PAYMENT_STATE_FAILED';
+    public const STATUS_CANCELLED = 'PAYMENT_STATE_CANCELLED';
+    public const STATUS_PARTIALLY_REFUNDED = 'PAYMENT_STATE_PARTIALLY_REFUNDED';
+    public const STATUS_REFUNDED = 'PAYMENT_STATE_REFUNDED';
 
     private function __construct()
     {

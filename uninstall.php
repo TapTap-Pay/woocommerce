@@ -1,8 +1,12 @@
 <?php
 /**
  * Fires when the user deletes the plugin via WP admin (NOT on simple
- * deactivate). Tear down the webhook subscription on the API side and
- * drop our options row so a fresh install starts clean.
+ * deactivate). Drops our options row so a fresh install starts clean.
+ *
+ * The store's API key may take payments and nothing else, so it cannot
+ * remove the integration TapTap created for this store. The merchant
+ * revokes it under Integrations in the TapTap dashboard, which also
+ * revokes the key and the webhook subscription.
  */
 
 declare(strict_types=1);
@@ -11,38 +15,6 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
 
-$autoload = __DIR__ . '/vendor/autoload.php';
-if (file_exists($autoload)) {
-    require_once $autoload;
-}
-
-$option_key = 'woocommerce_taptap_pay_settings';
-$settings = get_option($option_key, []);
-
-if (is_array($settings)
-    && !empty($settings['api_key'])
-    && !empty($settings['webhook_id'])
-    && class_exists(\TapTap\Pay\Client::class)
-) {
-    try {
-        $mode = $settings['mode'] ?? 'production';
-        $baseUrl = $mode === 'sandbox'
-            ? 'https://api.usetaptap.dev'
-            : 'https://api.usetaptap.com';
-
-        $client = new \TapTap\Pay\Client(new \TapTap\Pay\Options(
-            apiKey: (string) $settings['api_key'],
-            baseUrl: $baseUrl,
-        ));
-        $client->webhooks->deleteWebhook(
-            (new \Programmatic\Webhooks\V1\DeleteWebhookRequest())
-                ->setId((string) $settings['webhook_id'])
-        );
-    } catch (\Throwable $e) {
-        // Best-effort: a network blip during uninstall shouldn't block
-        // the local cleanup below. The vendor can prune leftover subs
-        // from the dashboard.
-    }
-}
-
-delete_option($option_key);
+delete_option('woocommerce_taptap_pay_settings');
+delete_transient('taptap_pay_connection');
+delete_transient('taptap_pay_connect_notices');

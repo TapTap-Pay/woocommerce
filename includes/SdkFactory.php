@@ -26,7 +26,7 @@ final class SdkFactory
     {
         if (!$settings->is_configured()) {
             throw new \RuntimeException(
-                __('TapTap Pay is not configured: API key and wallet ID are required.', 'taptap-pay')
+                __('TapTap Pay is not configured: connect the store to TapTap first.', 'taptap-pay')
             );
         }
         $base = $settings->api_url();
