@@ -17,8 +17,8 @@ TapTap Pay for WooCommerce adds TapTap-Pay as a checkout option on your WooComme
 **Features:**
 
 * Hosted checkout — no card data ever touches your store.
-* Auto-provisioned webhook on save: paste your API key and the plugin sets up the rest.
-* HMAC-SHA256 V2 signature verification on every webhook delivery.
+* One-click connect: approve the store in your TapTap dashboard and the API key and webhook are set up for you.
+* HMAC-SHA256 signature verification on every webhook delivery.
 * Refunds from the WooCommerce order admin.
 * Self-update from GitHub releases — no manual zip uploads after the first install.
 * Compatible with WooCommerce High-Performance Order Storage (HPOS).
@@ -27,17 +27,19 @@ TapTap Pay for WooCommerce adds TapTap-Pay as a checkout option on your WooComme
 
 1. Download the latest `taptap-pay-*.zip` from [GitHub releases](https://github.com/TapTap-Pay/woocommerce/releases).
 2. WP Admin → Plugins → Add New → Upload Plugin → choose the zip → Install Now → Activate.
-3. You will be redirected to the gateway settings page. Paste your TapTap API key (from app.usetaptap.com → Settings → API Keys) and the wallet UUID that should receive payouts.
-4. Click Save Changes. The plugin will auto-create a webhook subscription pointing at your store.
-5. Tick "Enable TapTap Pay at checkout" and save again.
+3. You will be redirected to the gateway settings page. Pick Sandbox or Production and click Save Changes.
+4. Click "Authorize in TapTap" and approve the connection in your TapTap dashboard. TapTap creates an API key and a webhook subscription for the store and sends you back.
+5. Verify the store's domain in your TapTap dashboard so customers are sent back to the store after paying.
 
 That's it — place a test order to confirm.
+
+The store must be served over https and use pretty permalinks (any structure other than "Plain").
 
 == Frequently Asked Questions ==
 
 = Where do I get an API key? =
 
-Sign up at https://app.usetaptap.com and mint a key under Settings → API Keys. Sandbox keys are prefixed `sk_test_`; live keys `sk_live_`.
+You don't paste one. Clicking "Authorize in TapTap" and approving the connection creates a key that can only take and refund payments for this store. To disconnect, revoke the store under Integrations in your TapTap dashboard.
 
 = Does the plugin auto-update? =
 
@@ -45,7 +47,7 @@ Yes. WP checks the [GitHub releases](https://github.com/TapTap-Pay/woocommerce/r
 
 = How are webhooks verified? =
 
-Each delivery carries `X-Webhook-Signature-V2: t=<unix>,v1=<hex>`. The plugin recomputes HMAC-SHA256 over `<timestamp>.<raw-body>` with your subscription secret and rejects mismatches and stale (>5min) timestamps.
+Each delivery carries `TapTap-Signature: t=<unix>,v1=<hex>`. The plugin recomputes HMAC-SHA256 over `<timestamp>.<raw-body>` with your subscription secret and rejects mismatches and stale (>5min) timestamps.
 
 = Where do I see plugin logs? =
 

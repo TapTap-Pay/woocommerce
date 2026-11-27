@@ -21,18 +21,18 @@ use WC_Order;
 final class OrderUpdater
 {
     public const META_PAYMENT_ID = '_taptap_payment_id';
+    public const META_LINK_ID = '_taptap_payment_link_id';
     public const META_LAST_EVENT = '_taptap_last_event';
     public const META_PROCESSED_EVENTS = '_taptap_processed_events';
 
     /**
-     * Apply a TapTap webhook event to the order. The event payload
-     * shape mirrors what the API emits (see
-     * api/proto/schema/v1/programmatic/_docs/flows/webhook-delivery.md):
+     * Apply a TapTap webhook event to the order. The payload is the
+     * delivery envelope:
      *
      *   {
-     *     "event_id":   "...",
+     *     "event_id":   "evt_...",
      *     "event_type": "payment.succeeded",
-     *     "payment":    { "id": "...", "status": "...", "amount": { ... }, ... }
+     *     "data":       { "payment_id": "pay_...", "amount_minor": "1050", "currency": "EUR", ... }
      *   }
      */
     public static function apply_event(WC_Order $order, string $event_type, array $payload): void
@@ -45,6 +45,8 @@ final class OrderUpdater
             ]);
             return;
         }
+
+        self::remember_payment($order, $event_type, (string) ($payload['data']['payment_id'] ?? ''));
 
         if (in_array($event_type, EventMap::EVENTS_PAID, true)) {
             self::mark_paid($order, $event_type);
@@ -74,27 +76,41 @@ final class OrderUpdater
     }
 
     /**
-     * Reconcile an order against a freshly-fetched Payment object.
-     * Used on the customer return path where we don't have an event
-     * envelope, only the current status.
-     *
-     * @param array{id?: string, status?: string|int, amount?: array} $payment
+     * Reconcile an order against a freshly-fetched payment. Used on
+     * the customer return path where we don't have an event envelope,
+     * only the payment's id and its current PaymentState name.
      */
-    public static function reconcile_from_payment(WC_Order $order, array $payment): void
+    public static function reconcile_from_payment(WC_Order $order, string $payment_id, string $state): void
     {
-        $status = (string) ($payment['status'] ?? '');
-        $synthetic_event = match ($status) {
-            EventMap::STATUS_SUCCEEDED => 'payment.succeeded',
+        $synthetic_event = match ($state) {
+            // A partly refunded payment was paid first.
+            EventMap::STATUS_SUCCEEDED, EventMap::STATUS_PARTIALLY_REFUNDED => 'payment.succeeded',
             EventMap::STATUS_FAILED => 'payment.failed',
             EventMap::STATUS_CANCELLED => 'payment.cancelled',
             EventMap::STATUS_REFUNDED => 'payment.refunded',
             default => '',
         };
         if ($synthetic_event === '') {
-            // PENDING / IN_PROGRESS — leave the order in its current state.
+            // PENDING / PENDING_APPROVAL / AUTHORIZED — leave the order in its current state.
             return;
         }
-        self::apply_event($order, $synthetic_event, ['payment' => $payment]);
+        self::apply_event($order, $synthetic_event, ['data' => ['payment_id' => $payment_id]]);
+    }
+
+    /**
+     * A checkout link can see several attempts. The order keeps the
+     * id of the one that was paid, because that is the payment a
+     * refund has to name; until then it keeps the first one it saw.
+     */
+    private static function remember_payment(WC_Order $order, string $event_type, string $payment_id): void
+    {
+        if ($payment_id === '') {
+            return;
+        }
+        $known = (string) $order->get_meta(self::META_PAYMENT_ID, true);
+        if ($known === '' || in_array($event_type, EventMap::EVENTS_PAID, true)) {
+            $order->update_meta_data(self::META_PAYMENT_ID, $payment_id);
+        }
     }
 
     private static function mark_paid(WC_Order $order, string $event): void
@@ -115,9 +131,7 @@ final class OrderUpdater
         if ($order->get_status() === 'failed' || $order->is_paid()) {
             return;
         }
-        $reason = (string) ($payload['payment']['failure_message']
-            ?? $payload['failure_message']
-            ?? '');
+        $reason = (string) ($payload['data']['decline_reason'] ?? '');
         $note = sprintf(
             /* translators: 1: TapTap event name, 2: failure reason. */
             __('TapTap %1$s. %2$s', 'taptap-pay'),
@@ -153,12 +167,8 @@ final class OrderUpdater
 
     private static function note_partial_refund(WC_Order $order, array $payload): void
     {
-        $amount = (string) ($payload['refund_amount']['amount_minor']
-            ?? $payload['payment']['refunded_amount']['amount_minor']
-            ?? '');
-        $currency = (string) ($payload['refund_amount']['currency']
-            ?? $payload['payment']['amount']['currency']
-            ?? $order->get_currency());
+        $amount = (string) ($payload['data']['amount_minor'] ?? '');
+        $currency = (string) ($payload['data']['currency'] ?? $order->get_currency());
         if ($amount !== '' && ctype_digit($amount)) {
             $human = wc_price(Money::from_minor((int) $amount, $currency), ['currency' => $currency]);
             $note = sprintf(
@@ -200,15 +210,26 @@ final class OrderUpdater
      */
     public static function find_by_payment_id(string $payment_id): ?WC_Order
     {
-        if ($payment_id === '') {
+        return self::find_by_meta(self::META_PAYMENT_ID, $payment_id);
+    }
+
+    /** Find the order whose checkout went through the given payment link (`plink_…`). */
+    public static function find_by_link_id(string $link_id): ?WC_Order
+    {
+        return self::find_by_meta(self::META_LINK_ID, $link_id);
+    }
+
+    private static function find_by_meta(string $key, string $value): ?WC_Order
+    {
+        if ($value === '') {
             return null;
         }
         $orders = wc_get_orders([
             'limit' => 1,
             'meta_query' => [
                 [
-                    'key' => self::META_PAYMENT_ID,
-                    'value' => $payment_id,
+                    'key' => $key,
+                    'value' => $value,
                 ],
             ],
         ]);

@@ -13,7 +13,7 @@ final class Settings
         public readonly string $title,
         public readonly string $description,
         public readonly string $apiKey,
-        public readonly string $walletId,
+        public readonly string $vendorId,
         public readonly string $mode,
         public readonly string $webhookSecret,
         public readonly string $webhookId,
@@ -31,7 +31,7 @@ final class Settings
             title: (string) ($raw['title'] ?? __('TapTap Pay', 'taptap-pay')),
             description: (string) ($raw['description'] ?? __('Pay securely via TapTap Pay.', 'taptap-pay')),
             apiKey: (string) ($raw['api_key'] ?? ''),
-            walletId: (string) ($raw['wallet_id'] ?? ''),
+            vendorId: (string) ($raw['vendor_id'] ?? ''),
             mode: (string) ($raw['mode'] ?? 'production'),
             webhookSecret: (string) ($raw['webhook_secret'] ?? ''),
             webhookId: (string) ($raw['webhook_id'] ?? ''),
@@ -55,7 +55,7 @@ final class Settings
 
     public function is_configured(): bool
     {
-        return $this->apiKey !== '' && $this->walletId !== '';
+        return $this->apiKey !== '' && $this->vendorId !== '';
     }
 
     public function api_url(): string

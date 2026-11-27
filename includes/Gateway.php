@@ -6,23 +6,34 @@ namespace TapTap\Pay\WooCommerce;
 
 defined('ABSPATH') || exit;
 
-use Common\V1\Money as ProtoMoney;
-use Common\V1\PaginationRequestData;
-use Programmatic\Payments\V1\GetPaymentRequest;
-use Programmatic\Payments\V1\RequestPaymentRequest;
-use Programmatic\Refunds\V1\CreateRefundRequest;
-use Programmatic\Transactions\V1\ListTransactionsRequest;
-use Programmatic\Types\V1\TransactionKind;
-use Programmatic\Types\V1\TransactionStatus;
+use Taptap\Common\V1\Money as ProtoMoney;
+use Taptap\Payment\Programmatic\V1\CreatePaymentLinkRequest;
+use Taptap\Payment\Programmatic\V1\PaymentLink;
+use Taptap\Payment\Programmatic\V1\PaymentLinkUsage;
+use Taptap\Payment\Programmatic\V1\PaymentState;
+use Taptap\Payment\Programmatic\V1\RefundPaymentRequest;
+use Taptap\Payment\Programmatic\V1\RefundReason;
+use TapTap\Pay\Client as SdkClient;
 use TapTap\Pay\Connect\Error as ConnectError;
 use TapTap\Pay\Errors as SdkErrors;
-use TapTap\Pay\Idempotency;
 use WC_Order;
 use WC_Payment_Gateway;
 use WP_Error;
 
 final class Gateway extends WC_Payment_Gateway
 {
+    /**
+     * TapTap only redirects a payer to a verified domain of the vendor,
+     * over https. Either refusal means this store's return address is
+     * not one it will send customers to.
+     */
+    private const REDIRECT_REFUSALS = [
+        'PAYMENT_LINK_REDIRECT_NOT_ALLOWED',
+        'PAYMENT_LINK_REDIRECT_SCHEME_INVALID',
+    ];
+
+    private const NOTICES_TRANSIENT = 'taptap_pay_connect_notices';
+
     public function __construct()
     {
         $this->id = Plugin::GATEWAY_ID;
@@ -100,7 +111,7 @@ final class Gateway extends WC_Payment_Gateway
         if ($old_mode !== $new_mode) {
             Settings::persist_patch([
                 'api_key' => '',
-                'wallet_id' => '',
+                'vendor_id' => '',
                 'webhook_secret' => '',
                 'webhook_id' => '',
                 'enabled' => 'no',
@@ -136,7 +147,8 @@ final class Gateway extends WC_Payment_Gateway
 
         try {
             $client = SdkFactory::from_settings($settings);
-            $request = (new RequestPaymentRequest())
+            $request = (new CreatePaymentLinkRequest())
+                ->setVendorId($settings->vendorId)
                 ->setIdempotencyKey($this->idempotency_key_for($order))
                 ->setTitle(sprintf(
                     __('Order #%s', 'taptap-pay'),
@@ -147,21 +159,17 @@ final class Gateway extends WC_Payment_Gateway
                     get_bloginfo('name'),
                     $order->get_order_number()
                 ))
-                ->setTotal((new ProtoMoney())
+                ->setAmount((new ProtoMoney())
                     ->setAmountMinor($amount_minor)
                     ->setCurrency($currency))
-                ->setTargetWalletId($settings->walletId)
-                ->setMetadata([
-                    'wc_order_id' => (string) $order->get_id(),
-                    'wc_order_key' => (string) $order->get_order_key(),
-                    'wc_source' => 'taptap-woocommerce/' . TAPTAP_PAY_VERSION,
-                ])
+                // One order, one payment: the link stops working once it is paid.
+                ->setUsage((new PaymentLinkUsage())->setLimited(1))
                 ->setSuccessUrl($return_url)
                 ->setCancelUrl($return_url);
 
-            $response = $client->payments->requestPayment($request);
+            $link = $this->create_checkout_link($client, $request, $order);
         } catch (ConnectError $e) {
-            Logger::error('RequestPayment failed', [
+            Logger::error('CreatePaymentLink failed', [
                 'order_id' => $order_id,
                 'code' => $e->connectCode,
                 'message' => $e->getMessage(),
@@ -173,28 +181,18 @@ final class Gateway extends WC_Payment_Gateway
             return ['result' => 'failure'];
         }
 
-        $payment = $response->getPayment();
-        if ($payment === null || $payment->getId() === '') {
-            wc_add_notice(__('TapTap did not return a payment id.', 'taptap-pay'), 'error');
+        if ($link === null || $link->getId() === '' || $link->getPublicUrl() === '') {
+            wc_add_notice(__('TapTap did not return a checkout address.', 'taptap-pay'), 'error');
             return ['result' => 'failure'];
         }
-        $payment_id = $payment->getId();
 
-        $order->update_meta_data(OrderUpdater::META_PAYMENT_ID, $payment_id);
+        $order->update_meta_data(OrderUpdater::META_LINK_ID, $link->getId());
         $order->update_status('pending', __('Waiting for TapTap Pay confirmation.', 'taptap-pay'));
         $order->save();
 
-        $checkoutUrl = '';
-        if (method_exists($payment, 'getCheckoutUrl')) {
-            $checkoutUrl = trim((string) $payment->getCheckoutUrl());
-        }
-        if ($checkoutUrl === '') {
-            $checkoutUrl = $this->hosted_checkout_url($payment_id);
-        }
-
         return [
             'result' => 'success',
-            'redirect' => $checkoutUrl,
+            'redirect' => $link->getPublicUrl(),
         ];
     }
 
@@ -204,10 +202,6 @@ final class Gateway extends WC_Payment_Gateway
         if (!$order instanceof WC_Order) {
             return new WP_Error('taptap_refund_no_order', __('Order not found.', 'taptap-pay'));
         }
-        $payment_id = (string) $order->get_meta(OrderUpdater::META_PAYMENT_ID, true);
-        if ($payment_id === '') {
-            return new WP_Error('taptap_refund_no_payment', __('Order has no associated TapTap payment id.', 'taptap-pay'));
-        }
         if ($amount === null || $amount <= 0) {
             return new WP_Error('taptap_refund_bad_amount', __('Refund amount must be greater than zero.', 'taptap-pay'));
         }
@@ -215,28 +209,35 @@ final class Gateway extends WC_Payment_Gateway
         $currency = strtoupper($order->get_currency());
         $minor = Money::to_minor((float) $amount, $currency);
 
+        $payment_id = (string) $order->get_meta(OrderUpdater::META_PAYMENT_ID, true);
         try {
-            $client = SdkFactory::from_settings(Plugin::settings());
-            $payinId = $this->find_refundable_payin($client, $payment_id);
-            if ($payinId === '') {
-                return new WP_Error(
-                    'taptap_refund_no_payin',
-                    __('No settled TapTap transaction found to refund against.', 'taptap-pay')
-                );
+            $settings = Plugin::settings();
+            $client = SdkFactory::from_settings($settings);
+            if ($payment_id === '') {
+                // No webhook and no customer return told the order which
+                // payment its link produced, so ask.
+                $payment_id = (string) PaymentLookup::for_order($client, $settings, $order)?->getPaymentId();
+                if ($payment_id === '') {
+                    return new WP_Error('taptap_refund_no_payment', __('Order has no associated TapTap payment id.', 'taptap-pay'));
+                }
+                $order->update_meta_data(OrderUpdater::META_PAYMENT_ID, $payment_id);
+                $order->save();
             }
 
-            $req = (new CreateRefundRequest())
-                ->setTransactionId($payinId)
-                ->setAmount((new ProtoMoney())
-                    ->setAmountMinor($minor)
-                    ->setCurrency($currency))
-                ->setIdempotencyKey('wc_refund_' . $order_id . '_' . hash('sha256', (string) $amount . '|' . $reason));
-            if ($reason !== '') {
-                $req->setReason($reason);
-            }
-            $client->refunds->createRefund($req);
+            $client->refunds->refundPayment(
+                (new RefundPaymentRequest())
+                    ->setVendorId($settings->vendorId)
+                    ->setPaymentId($payment_id)
+                    ->setAmount((new ProtoMoney())
+                        ->setAmountMinor($minor)
+                        ->setCurrency($currency))
+                    // The merchant's reason is free text and the API takes
+                    // a closed set; the text stays on the order note below.
+                    ->setReason(RefundReason::REFUND_REASON_OTHER)
+                    ->setRequestKey('wc_refund_' . $order_id . '_' . hash('sha256', (string) $amount . '|' . $reason))
+            );
         } catch (ConnectError $e) {
-            Logger::error('CreateRefund failed', [
+            Logger::error('RefundPayment failed', [
                 'order_id' => $order_id,
                 'payment_id' => $payment_id,
                 'code' => $e->connectCode,
@@ -269,31 +270,25 @@ final class Gateway extends WC_Payment_Gateway
             exit;
         }
 
-        $payment_id = (string) $order->get_meta(OrderUpdater::META_PAYMENT_ID, true);
-        if ($payment_id !== '') {
-            try {
-                $client = SdkFactory::from_settings(Plugin::settings());
-                $resp = $client->payments->getPayment(
-                    (new GetPaymentRequest())->setPaymentId($payment_id)
+        try {
+            $settings = Plugin::settings();
+            $payment = PaymentLookup::for_order(SdkFactory::from_settings($settings), $settings, $order);
+            if ($payment !== null) {
+                OrderUpdater::reconcile_from_payment(
+                    $order,
+                    $payment->getPaymentId(),
+                    (string) PaymentState::name($payment->getState())
                 );
-                $p = $resp->getPayment();
-                if ($p !== null) {
-                    $statusName = \Programmatic\Types\V1\PaymentStatus::name($p->getStatus());
-                    OrderUpdater::reconcile_from_payment($order, [
-                        'id' => $p->getId(),
-                        'status' => $statusName,
-                    ]);
-                }
-            } catch (\Throwable $e) {
-                Logger::warning('return-path GetPayment failed', [
-                    'order_id' => $order_id,
-                    'error' => $e->getMessage(),
-                ]);
-                $order->add_order_note(sprintf(
-                    __('TapTap status check failed on return: %s', 'taptap-pay'),
-                    $e->getMessage()
-                ));
             }
+        } catch (\Throwable $e) {
+            Logger::warning('return-path payment lookup failed', [
+                'order_id' => $order_id,
+                'error' => $e->getMessage(),
+            ]);
+            $order->add_order_note(sprintf(
+                __('TapTap status check failed on return: %s', 'taptap-pay'),
+                $e->getMessage()
+            ));
         }
 
         wp_safe_redirect($order->get_checkout_order_received_url());
@@ -304,16 +299,15 @@ final class Gateway extends WC_Payment_Gateway
 
     public function handle_authorize_redirect(): void
     {
-        $state = wp_generate_password(32, false);
-        set_transient('taptap_oauth_state', $state, 600);
+        $this->require_store_manager();
 
-        $settings = Plugin::settings();
-        $callback = \WC()->api_request_url('taptap_callback');
-
-        $url = $settings->ui_url() . '/authorize/woocommerce?' . http_build_query([
-            'redirect_uri' => $callback,
-            'state' => $state,
-        ]);
+        try {
+            $url = Connection::begin(Plugin::settings(), \WC()->api_request_url('taptap_callback'));
+        } catch (\RuntimeException $e) {
+            $this->flash('error', $e->getMessage());
+            wp_safe_redirect($this->settings_url());
+            exit;
+        }
 
         wp_redirect($url);
         exit;
@@ -321,70 +315,117 @@ final class Gateway extends WC_Payment_Gateway
 
     public function handle_authorize_callback(): void
     {
-        $settings_url = admin_url(
-            'admin.php?page=wc-settings&tab=checkout&section=' . Plugin::GATEWAY_ID
-        );
+        $this->require_store_manager();
 
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $this->handle_callback_post($settings_url);
-        } else {
-            $this->handle_callback_get($settings_url);
-        }
-    }
+        $state = sanitize_text_field((string) ($_GET['state'] ?? ''));
+        $code = sanitize_text_field((string) ($_GET['code'] ?? ''));
+        $error = sanitize_text_field((string) ($_GET['error'] ?? ''));
 
-    private function handle_callback_post(string $settings_url): void
-    {
-        $state = sanitize_text_field((string) ($_POST['state'] ?? ''));
-        $api_key = sanitize_text_field((string) ($_POST['api_key'] ?? ''));
-        $wallet_id = sanitize_text_field((string) ($_POST['wallet_id'] ?? ''));
-        $webhook_secret = sanitize_text_field((string) ($_POST['webhook_secret'] ?? ''));
-        $webhook_id = sanitize_text_field((string) ($_POST['webhook_subscription_id'] ?? ''));
-
-        $stored_state = (string) get_transient('taptap_oauth_state');
-        delete_transient('taptap_oauth_state');
-
-        if ($state === '' || $stored_state === '' || !hash_equals($stored_state, $state)) {
-            \WC_Admin_Settings::add_error(
+        $verifier = Connection::take_verifier($state);
+        if ($verifier === null) {
+            $this->flash(
+                'error',
                 __('TapTap authorization failed: invalid or expired state. Please try again.', 'taptap-pay')
             );
-            wp_safe_redirect($settings_url);
-            exit;
-        }
-
-        if ($api_key === '') {
-            \WC_Admin_Settings::add_error(
+        } elseif ($error !== '') {
+            $this->flash('error', sprintf(
+                __('TapTap authorization was denied: %s.', 'taptap-pay'),
+                $error
+            ));
+        } elseif ($code === '') {
+            $this->flash(
+                'error',
                 __('TapTap authorization failed: no credentials received.', 'taptap-pay')
             );
-            wp_safe_redirect($settings_url);
-            exit;
+        } else {
+            $this->finish_connection($code, $verifier);
+        }
+
+        wp_safe_redirect($this->settings_url());
+        exit;
+    }
+
+    private function finish_connection(string $code, string $verifier): void
+    {
+        try {
+            $credentials = Connection::exchange(Plugin::settings(), $code, $verifier);
+        } catch (\RuntimeException $e) {
+            Logger::error('install code exchange failed', ['error' => $e->getMessage()]);
+            $this->flash('error', sprintf(
+                __('TapTap authorization failed: the store could not collect its credentials (%s). Please try again.', 'taptap-pay'),
+                $e->getMessage()
+            ));
+            return;
         }
 
         Settings::persist_patch([
             'enabled' => 'yes',
-            'api_key' => $api_key,
-            'wallet_id' => $wallet_id,
-            'webhook_secret' => $webhook_secret,
-            'webhook_id' => $webhook_id,
+            'api_key' => $credentials['api_key'],
+            'vendor_id' => $credentials['vendor_id'],
+            'webhook_secret' => $credentials['webhook_secret'],
+            'webhook_id' => $credentials['webhook_id'],
         ]);
+        SdkFactory::reset();
 
-        \WC_Admin_Settings::add_message(
+        $this->flash(
+            'success',
             __('TapTap Pay is now connected and enabled at checkout.', 'taptap-pay')
         );
-        wp_safe_redirect($settings_url);
-        exit;
+        if (!$credentials['webhook_verified']) {
+            $this->flash(
+                'error',
+                __('TapTap could not verify this store\'s webhook address, so payment updates will not arrive yet. Re-send the verification from the webhook settings in your TapTap dashboard.', 'taptap-pay')
+            );
+        }
     }
 
-    private function handle_callback_get(string $settings_url): void
+    /**
+     * Both connect endpoints are public URLs. Without this check anyone
+     * could start a handshake and finish it with their own TapTap
+     * account, pointing the store's payments at themselves.
+     */
+    private function require_store_manager(): void
     {
-        $error = sanitize_text_field((string) ($_GET['error'] ?? ''));
-        if ($error !== '') {
-            \WC_Admin_Settings::add_error(sprintf(
-                __('TapTap authorization was denied: %s.', 'taptap-pay'),
-                $error
-            ));
+        if (!current_user_can('manage_woocommerce')) {
+            wp_die(
+                esc_html__('You are not allowed to connect this store to TapTap.', 'taptap-pay'),
+                '',
+                ['response' => 403]
+            );
         }
-        wp_safe_redirect($settings_url);
-        exit;
+    }
+
+    private function settings_url(): string
+    {
+        return admin_url('admin.php?page=wc-settings&tab=checkout&section=' . Plugin::GATEWAY_ID);
+    }
+
+    /**
+     * The connect endpoints answer with a redirect, so what they have
+     * to tell the merchant must outlive the request.
+     */
+    private function flash(string $type, string $message): void
+    {
+        $notices = get_transient(self::NOTICES_TRANSIENT);
+        $notices = is_array($notices) ? $notices : [];
+        $notices[] = ['type' => $type, 'message' => $message];
+        set_transient(self::NOTICES_TRANSIENT, $notices, 300);
+    }
+
+    private function render_flashed_notices(): void
+    {
+        $notices = get_transient(self::NOTICES_TRANSIENT);
+        if (!is_array($notices)) {
+            return;
+        }
+        delete_transient(self::NOTICES_TRANSIENT);
+        foreach ($notices as $notice) {
+            printf(
+                '<div class="notice notice-%s inline"><p>%s</p></div>',
+                ($notice['type'] ?? '') === 'error' ? 'error' : 'success',
+                esc_html((string) ($notice['message'] ?? ''))
+            );
+        }
     }
 
     // ---- Sandbox banner -----------------------------------------------------
@@ -415,6 +456,8 @@ final class Gateway extends WC_Payment_Gateway
         $settings = Plugin::settings();
         $mode = $settings->mode;
 
+        $this->render_flashed_notices();
+
         if ($settings->is_configured()) {
             echo '<div style="margin-bottom:16px;padding:12px 16px;border:1px solid #00a32a;border-radius:6px;background:#edfaef;">';
             echo '<strong>✓ ' . esc_html__('Connected to TapTap', 'taptap-pay') . '</strong>';
@@ -429,7 +472,7 @@ final class Gateway extends WC_Payment_Gateway
             echo '<div style="margin-bottom:24px;padding:20px;border:1px solid #2271b1;border-radius:8px;background:#f0f6fc;">';
             echo '<h3 style="margin:0 0 8px">' . esc_html__('Connect your TapTap account', 'taptap-pay') . '</h3>';
             echo '<p style="margin:0 0 12px;color:#555;">';
-            echo esc_html__('Click the button below to securely connect this store to your TapTap vendor account. You\'ll choose which wallet should receive payouts.', 'taptap-pay');
+            echo esc_html__('Click the button below to securely connect this store to your TapTap vendor account. You\'ll approve the connection in your TapTap dashboard.', 'taptap-pay');
             echo '</p>';
             echo '<a href="' . esc_url($authorize_url) . '" class="button button-primary button-hero">';
             echo '🔗 ' . esc_html__('Authorize in TapTap', 'taptap-pay');
@@ -544,35 +587,41 @@ final class Gateway extends WC_Payment_Gateway
         );
     }
 
-    private function hosted_checkout_url(string $payment_id): string
-    {
-        return rtrim(Plugin::settings()->ui_url(), '/') . '/pay?payment_id=' . rawurlencode($payment_id);
-    }
-
     private function idempotency_key_for(WC_Order $order): string
     {
         return 'wc_' . $order->get_id() . '_' . $order->get_order_key();
     }
 
-    private function find_refundable_payin(\TapTap\Pay\Client $client, string $payment_id): string
+    /**
+     * Creates the order's checkout link. When TapTap refuses the
+     * store's return address the link is created without one: the
+     * customer then stays on TapTap's confirmation page after paying
+     * and the order is completed by the webhook alone, which beats
+     * taking no payments until the domain is verified.
+     *
+     * @throws ConnectError on any other RPC failure.
+     */
+    private function create_checkout_link(SdkClient $client, CreatePaymentLinkRequest $request, WC_Order $order): ?PaymentLink
     {
-        $req = (new ListTransactionsRequest())
-            ->setPaymentId($payment_id)
-            ->setKind(TransactionKind::TRANSACTION_KIND_PAYIN)
-            ->setStatus(TransactionStatus::TRANSACTION_STATUS_SUCCEEDED)
-            ->setPagination((new PaginationRequestData())->setPage(1)->setPageSize(50));
-        $resp = $client->transactions->listTransactions($req);
-
-        $best = '';
-        $bestAmount = -1;
-        foreach ($resp->getTransactions() as $tx) {
-            $amount = $tx->getAmount();
-            $minor = $amount === null ? 0 : (int) $amount->getAmountMinor();
-            if ($minor > $bestAmount) {
-                $bestAmount = $minor;
-                $best = $tx->getId();
+        try {
+            return $client->paymentLinks->createPaymentLink($request)->getPaymentLink();
+        } catch (ConnectError $e) {
+            if (!in_array(SdkErrors::errorCode($e), self::REDIRECT_REFUSALS, true)) {
+                throw $e;
             }
         }
-        return $best;
+
+        Logger::warning('TapTap refused the store return address; checkout continues without it', [
+            'order_id' => $order->get_id(),
+        ]);
+        $order->add_order_note(
+            __('TapTap will not send the customer back to this store after payment, because the store\'s domain is not a verified domain of your TapTap account (or the store is not served over https). Verify the domain in your TapTap dashboard to fix this. The order is still updated when the payment completes.', 'taptap-pay')
+        );
+        // The key covers the request's content, and this is a different request.
+        $request
+            ->setSuccessUrl('')
+            ->setCancelUrl('')
+            ->setIdempotencyKey($request->getIdempotencyKey() . '_noreturn');
+        return $client->paymentLinks->createPaymentLink($request)->getPaymentLink();
     }
 }
